@@ -1,0 +1,41 @@
+Aqui estão os principais trade-offs conceituais da nossa solução:
+
+### 1. Comunicação Persistente (WebSockets) vs. Requisição-Resposta (HTTP)
+*   **Por que escolhemos:** Para mensagens, a latência é crítica. O WebSocket mantém uma conexão aberta (full-duplex), permitindo que o servidor "empurre" a mensagem para o cliente instantaneamente.
+*   **O Trade-off:** 
+    *   **Ganho:** Baixíssima latência e economia de banda (sem headers HTTP repetitivos).
+    *   **Custo:** Servidores **stateful**. Diferente do HTTP (stateless), o servidor precisa manter a conexão na memória. Isso exige estratégias complexas de Load Balancing (Sticky Sessions) e maior consumo de RAM no servidor.
+
+### 2. Bancos de Dados Não-Relacionais (NoSQL) vs. Relacionais (SQL)
+*   **Por que escolhemos:** Aplicativos de chat geram um volume massivo de **escrita** (write-heavy). Bancos NoSQL (como Wide-column ou Document) escalam horizontalmente com facilidade.
+*   **O Trade-off:**
+    *   **Ganho:** Escalabilidade linear e alta performance de escrita.
+    *   **Custo:** **Consistência Eventual** e dificuldade em consultas complexas. Você perde a facilidade de fazer "Joins" complexos e garante que o dado será escrito rápido, mas pode haver um pequeno atraso para que ele esteja disponível em todas as réplicas de leitura.
+
+### 3. Arquitetura Baseada em Eventos (Assíncrona) vs. Chamadas Síncronas
+*   **Por que escolhemos:** Usar um Message Broker (Kafka) permite que o sistema continue funcionando mesmo se o serviço de notificação ou de histórico cair.
+*   **O Trade-off:**
+    *   **Ganho:** **Resiliência e Desacoplamento**. O serviço que recebe a mensagem não precisa esperar o serviço de notificação terminar para responder ao usuário.
+    *   **Custo:** **Complexidade Operacional**. Rastrear uma mensagem através de múltiplos serviços (Distributed Tracing) é muito mais difícil do que em uma chamada síncrona simples.
+
+### 4. Armazenamento em Memória (Cache) vs. Disco para Estado de Presença
+*   **Por que escolhemos:** O status "Online/Offline" muda milhares de vezes por segundo. Gravar isso em disco (DB tradicional) destruiria a performance.
+*   **O Trade-off:**
+    *   **Ganho:** Velocidade extrema (latência sub-milissegundo).
+    *   **Custo:** **Volatilidade**. Se o servidor de cache reiniciar, você perde o estado momentâneo de quem está online. No nosso caso, isso é aceitável, pois o próximo *heartbeat* do usuário restaurará a informação.
+
+### 5. Desacoplamento de Mídia (Object Storage) vs. Processamento no Servidor
+*   **Por que escolhemos:** Ao usar URLs assinadas (Presigned URLs) para o S3, o arquivo vai direto do usuário para o storage.
+*   **O Trade-off:**
+    *   **Ganho:** **Eficiência de Recursos**. Seu servidor de aplicação não gasta CPU nem banda processando bytes de imagens ou vídeos pesados.
+    *   **Custo:** Menor controle imediato sobre o conteúdo. Como o arquivo não passa pelo seu código antes de ser salvo, você precisa de processos assíncronos (Lambda/Workers) para validar se o arquivo é seguro ou para gerar thumbnails.
+
+### 6. Orquestração de Microserviços vs. Monolito
+*   **Por que escolhemos:** Para permitir que o serviço de mensagens cresça independentemente do serviço de autenticação ou de anexos.
+*   **O Trade-off:**
+    *   **Ganho:** Escalabilidade independente e isolamento de falhas.
+    *   **Custo:** **Latência de Rede**. Cada comunicação entre microserviços adiciona alguns milissegundos de rede que não existiriam em um monolito (chamada de função em memória).
+
+---
+
+A arquitetura prioriza **Disponibilidade e Particionamento (AP do Teorema CAP)** em detrimento da Consistência Forte imediata, o que é o padrão ouro para sistemas de mensageria em escala global.
